@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Deep Tech dark palette (default) */
+    color-scheme: dark;
+    --dt-sidebar-bg:   #0F1729;
+    --dt-surface:      #1A2540;
+    --dt-border:       #2A3F6A;
+    --dt-text-primary: #E2EAF4;
+    --dt-text-muted:   #A8B8D0;
+    --dt-cyan:         #00D4FF;
+    --dt-success:      #00E5A0;
+    --dt-danger:       #FF5C72;
+    --dt-main-bg:      #0D1421;
+
+    /* shadcn/ui bridge variables (used by button.tsx via hsl(var(--primary))) */
+    --background:        210 29% 95%;
+    --foreground:        222 47% 11%;
+    --card:              220 38% 17%;
+    --card-foreground:   210 29% 93%;
+    --popover:           220 38% 17%;
+    --popover-foreground: 210 29% 93%;
+    --primary:           191 100% 50%;
+    --primary-foreground: 222 47% 11%;
+    --secondary:         220 38% 17%;
+    --secondary-foreground: 210 29% 93%;
+    --muted:             220 38% 17%;
+    --muted-foreground:  218 16% 62%;
+    --accent:            220 38% 17%;
+    --accent-foreground: 210 29% 93%;
+    --destructive:       352 100% 67%;
+    --destructive-foreground: 0 0% 100%;
+    --border:            222 41% 29%;
+    --input:             222 41% 29%;
+    --ring:              191 100% 50%;
+    --radius:            0.5rem;
+  }
+
+  /* Light theme overrides */
+  [data-theme="light"] {
+    color-scheme: light;
+    --dt-sidebar-bg:   #F1F5F9;
+    --dt-surface:      #FFFFFF;
+    --dt-border:       #CBD5E1;
+    --dt-text-primary: #0F172A;
+    --dt-text-muted:   #64748B;
+    --dt-cyan:         #0284C7;
+    --dt-success:      #059669;
+    --dt-danger:       #DC2626;
+    --dt-main-bg:      #F8FAFC;
+
+    --primary:           199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+    --card:              0 0% 100%;
+    --card-foreground:   222 47% 11%;
+    --secondary:         210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --border:            214 32% 91%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: var(--dt-main-bg);
+    color: var(--dt-text-primary);
+    font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif;
+    margin: 0;
+  }
+}
