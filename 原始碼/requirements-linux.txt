@@ -1,0 +1,24 @@
+# BMS FW Validation - Linux 伺服器版 Python 套件需求
+# 用途：在 Linux 伺服器上只跑「後端 API + 託管前端」，以瀏覽器存取。
+# 不含桌面外殼(PySide6)與打包工具(pyinstaller)，因為伺服器無顯示器、
+# 且 PyInstaller 無法在 Linux 產生 Windows exe。
+#
+# 安裝： pip install -r requirements-linux.txt
+# 版本號對齊原始 requirements.txt（對應 Python 3.10+）
+
+# ── 核心（必裝）──
+fastapi==0.136.0
+uvicorn==0.44.0
+openai>=1.40
+pypdf==6.9.1
+pydantic==2.12.5
+python-multipart==0.0.26
+
+# ── OCR（選用）──
+# 只有需要處理「掃描檔/圖片型 PDF」時才需要。
+# 額外還要在系統安裝 tesseract：  sudo apt install tesseract-ocr
+# 並注意 backend/pdf_utils.py 內若有寫死的 Windows tesseract 路徑需改成 Linux 路徑。
+# 取消下面三行的註解即可啟用：
+# PyMuPDF==1.27.2
+# pytesseract==0.3.13
+# Pillow==12.1.1
