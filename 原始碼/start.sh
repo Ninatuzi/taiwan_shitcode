@@ -2,7 +2,7 @@
 # ============================================================
 #  BMS FW Validation - Linux 啟動腳本（伺服器/生產模式）
 #  作用：用 uvicorn 跑後端，並由後端託管已建置的前端 (dist)
-#  存取：瀏覽器開 http://<伺服器IP>:8000
+#  存取：瀏覽器開 http://<伺服器IP>:7003
 #  用法：  ANTHROPIC_API_KEY=你的key bash start.sh
 #          或先 export ANTHROPIC_API_KEY=... 再 bash start.sh
 # ============================================================
@@ -10,7 +10,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PORT="${PORT:-8000}"
+PORT="${PORT:-7003}"
 HOST="${HOST:-0.0.0.0}"
 
 # ---- 檢查 venv ----

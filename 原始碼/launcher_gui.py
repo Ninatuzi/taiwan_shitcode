@@ -55,7 +55,7 @@ def _start_backend():
         uvicorn.run(
             "backend.main:app",
             host="127.0.0.1",
-            port=8000,
+            port=7003,
             log_level="warning",
         )
     except Exception as e:
@@ -99,7 +99,7 @@ class MainWindow(QMainWindow):
         self._attempts += 1
         try:
             # 非阻塞：timeout 設 0.3 秒，不會 hang UI
-            urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=0.3)
+            urllib.request.urlopen("http://127.0.0.1:7003/health", timeout=0.3)
             self._poll.stop()
             self._show_app()
         except Exception:
@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
                 self._show_app()
 
     def _show_app(self):
-        self._webview.setUrl(QUrl("http://127.0.0.1:8000"))
+        self._webview.setUrl(QUrl("http://127.0.0.1:7003"))
         self.setCentralWidget(self._webview)
 
     def _on_download(self, download):
