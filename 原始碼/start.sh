@@ -27,11 +27,9 @@ if [ -f ".env" ]; then
   set +a
 fi
 
-# ---- 檢查金鑰 ----
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "[WARN] 未設定 ANTHROPIC_API_KEY，生成功能會失敗。"
-  echo "       請 export ANTHROPIC_API_KEY=你的key，或在本目錄建立 .env 寫入該變數。"
-fi
+# ---- 顯示本地模型設定（可用環境變數覆蓋）----
+echo "本地模型： ${LLM_MODEL:-DeepSeek_32B_f16} @ ${LLM_BASE_URL:-http://10.0.6.89:8080/v1}"
+echo "（如需更換：export LLM_BASE_URL=... / LLM_MODEL=... 再啟動）"
 
 # ---- 檢查前端是否已建置 ----
 if [ ! -f "frontend/dist/index.html" ]; then
