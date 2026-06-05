@@ -13,11 +13,24 @@ cd "$(dirname "$0")"
 PORT="${PORT:-7003}"
 HOST="${HOST:-0.0.0.0}"
 
-# ---- 檢查 venv ----
-if [ ! -x "venv-ai/bin/uvicorn" ]; then
-  echo "[ERROR] 找不到 venv-ai，請先執行： bash setup.sh"
+# ---- 找 uvicorn：優先用當前已啟用的 venv，否則自動偵測常見 venv 目錄 ----
+if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/uvicorn" ]; then
+  UVICORN="${VIRTUAL_ENV}/bin/uvicorn"
+else
+  UVICORN=""
+  for d in venv-ai .venv venv taiwan_1 env; do
+    if [ -x "$d/bin/uvicorn" ]; then UVICORN="$d/bin/uvicorn"; break; fi
+  done
+  if [ -z "$UVICORN" ] && command -v uvicorn >/dev/null 2>&1; then
+    UVICORN="$(command -v uvicorn)"
+  fi
+fi
+if [ -z "$UVICORN" ]; then
+  echo "[ERROR] 找不到 uvicorn。請先建立並啟用虛擬環境，或執行： bash setup.sh"
+  echo "        若已建好其他名稱的 venv，請先 source <venv>/bin/activate 再執行本腳本。"
   exit 1
 fi
+echo "        使用 uvicorn: $UVICORN"
 
 # ---- 載入同目錄 .env（若存在）----
 if [ -f ".env" ]; then
@@ -38,4 +51,4 @@ if [ ! -f "frontend/dist/index.html" ]; then
 fi
 
 echo "啟動後端： http://${HOST}:${PORT}  （遠端請用 http://<伺服器IP>:${PORT} 存取）"
-exec ./venv-ai/bin/uvicorn backend.main:app --host "$HOST" --port "$PORT"
+exec "$UVICORN" backend.main:app --host "$HOST" --port "$PORT"
