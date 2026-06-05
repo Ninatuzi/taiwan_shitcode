@@ -7,9 +7,12 @@
 # 版本號對齊原始 requirements.txt（對應 Python 3.10+）
 
 # ── 核心（必裝）──
+# 注意：改用本地模型後，AI 呼叫走 httpx（呼叫 OpenAI 相容介面），
+# 不再需要 anthropic / openai SDK。httpx 為輕量套件，離線環境若已裝過
+# anthropic 即已附帶 httpx，可直接沿用、無需再裝。
 fastapi==0.136.0
 uvicorn==0.44.0
-openai>=1.40
+httpx>=0.27
 pypdf==6.9.1
 pydantic==2.12.5
 python-multipart==0.0.26

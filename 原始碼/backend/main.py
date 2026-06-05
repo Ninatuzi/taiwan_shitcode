@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import AsyncGenerator
 
-from openai import OpenAI
+import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -38,6 +38,7 @@ LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://10.0.6.89:8080/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "DeepSeek_32B_f16")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "EMPTY")  # 本地服務通常不驗證，但 SDK 需要非空字串
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "600"))  # 秒；本地大模型可能較慢
 LLM_STRIP_THINK = os.environ.get("LLM_STRIP_THINK", "1") not in ("0", "false", "False", "")
 
 
@@ -258,34 +259,54 @@ async def _analysis_stream(selected_titles: list[str], request: Request | None =
 - 測試點須涵蓋：下界-誤差、下界、下界+誤差、正常值、上界-誤差、上界、上界+誤差，每個測試點各一張 tc-card。
 """
 
-    client = OpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
     yield sse({"type": "log", "msg": f"開始呼叫本地模型 {LLM_MODEL} @ {LLM_BASE_URL} …"})
+
+    endpoint = LLM_BASE_URL.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": LLM_MAX_TOKENS,
+        "stream": True,
+    }
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_KEY and LLM_API_KEY != "EMPTY":
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
 
     stripper = _ThinkStripper(enabled=LLM_STRIP_THINK)
     try:
-        stream = client.chat.completions.create(
-            model=LLM_MODEL,
-            max_tokens=LLM_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-            stream=True,
-        )
-        for chunk in stream:
-            if request and await request.is_disconnected():
-                break
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta.content or ""
-            if not delta:
-                continue
-            visible = stripper.feed(delta)
-            if visible:
-                yield sse({"type": "chunk", "html": visible})
-                await asyncio.sleep(0)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(LLM_TIMEOUT, connect=10.0)) as http:
+            async with http.stream("POST", endpoint, json=payload, headers=headers) as resp:
+                if resp.status_code != 200:
+                    body = (await resp.aread()).decode("utf-8", "ignore")
+                    yield sse({"type": "error", "msg": f"模型服務回應 {resp.status_code}：{body[:500]}"})
+                    return
+                async for line in resp.aiter_lines():
+                    if request and await request.is_disconnected():
+                        break
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content") or ""
+                    if not delta:
+                        continue
+                    visible = stripper.feed(delta)
+                    if visible:
+                        yield sse({"type": "chunk", "html": visible})
+                        await asyncio.sleep(0)
         tail = stripper.flush()
         if tail:
             yield sse({"type": "chunk", "html": tail})
     except Exception as e:
-        yield sse({"type": "error", "msg": str(e)})
+        yield sse({"type": "error", "msg": f"呼叫模型失敗：{e}"})
         return
 
     yield sse({"type": "progress", "current": total_chapters, "total": total_chapters, "chapter": ""})
