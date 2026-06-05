@@ -34,12 +34,12 @@ from backend.pdf_utils import extract_chapters, extract_pages_for_chapter, clean
 from backend.csv_utils import parse_csv, match_params_for_chapters
 
 # ── 本地 LLM 設定（OpenAI 相容介面；可用環境變數覆蓋，不必改程式碼）──
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://10.0.6.89:8080/v1")
-LLM_MODEL = os.environ.get("LLM_MODEL", "DeepSeek_32B_f16")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://10.0.6.88:8006/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "gemma")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "EMPTY")  # 本地服務通常不驗證，但 SDK 需要非空字串
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "600"))  # 秒；本地大模型可能較慢
-LLM_STRIP_THINK = os.environ.get("LLM_STRIP_THINK", "1") not in ("0", "false", "False", "")
+LLM_STRIP_THINK = os.environ.get("LLM_STRIP_THINK", "0") not in ("0", "false", "False", "")
 
 
 class _ThinkStripper:
