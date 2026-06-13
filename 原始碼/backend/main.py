@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import AsyncGenerator
 
-import anthropic
+import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -33,11 +33,69 @@ def _resolve_frontend_dist() -> Path | None:
 from backend.pdf_utils import extract_chapters, extract_pages_for_chapter, clean_pdf_text, remove_repeated_lines, truncate_at_sibling_chapter
 from backend.csv_utils import parse_csv, match_params_for_chapters
 
+# ── 本地 LLM 設定（OpenAI 相容介面；可用環境變數覆蓋，不必改程式碼）──
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://10.0.6.88:8006/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "gemma")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "EMPTY")  # 本地服務通常不驗證，但 SDK 需要非空字串
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "600"))  # 秒；本地大模型可能較慢
+LLM_STRIP_THINK = os.environ.get("LLM_STRIP_THINK", "0") not in ("0", "false", "False", "")
+
+
+class _ThinkStripper:
+    """串流過濾器：移除推理模型（如 DeepSeek-R1 系列）輸出的 <think>...</think>
+    區塊，避免推理文字被當成 HTML 直接渲染。非推理模型則原樣通過。"""
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self, enabled: bool = True):
+        self._enabled = enabled
+        self._buf = ""
+        self._in_think = False
+
+    def feed(self, text: str) -> str:
+        if not self._enabled:
+            return text
+        self._buf += text
+        out: list[str] = []
+        while self._buf:
+            if not self._in_think:
+                idx = self._buf.find(self._OPEN)
+                if idx == -1:
+                    # 保留結尾少量字元，以防 <think> 標籤被切在兩個 chunk 之間
+                    keep = len(self._OPEN) - 1
+                    if len(self._buf) > keep:
+                        out.append(self._buf[:-keep])
+                        self._buf = self._buf[-keep:]
+                    break
+                out.append(self._buf[:idx])
+                self._buf = self._buf[idx + len(self._OPEN):]
+                self._in_think = True
+            else:
+                idx = self._buf.find(self._CLOSE)
+                if idx == -1:
+                    keep = len(self._CLOSE) - 1
+                    if len(self._buf) > keep:
+                        self._buf = self._buf[-keep:]  # 丟棄 think 內容，僅留可能的半個結束標籤
+                    break
+                self._buf = self._buf[idx + len(self._CLOSE):]
+                self._in_think = False
+        return "".join(out)
+
+    def flush(self) -> str:
+        if not self._enabled:
+            return ""
+        out = "" if self._in_think else self._buf
+        self._buf = ""
+        return out
+
+
 app = FastAPI(title="BMS FW Validation API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173", "http://localhost:8000"],
+    allow_origins=["http://localhost:5173", "http://localhost:4173", "http://localhost:7003"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -201,27 +259,54 @@ async def _analysis_stream(selected_titles: list[str], request: Request | None =
 - 測試點須涵蓋：下界-誤差、下界、下界+誤差、正常值、上界-誤差、上界、上界+誤差，每個測試點各一張 tc-card。
 """
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        yield sse({"type": "error", "msg": "未設定 ANTHROPIC_API_KEY 環境變數"})
-        return
+    yield sse({"type": "log", "msg": f"開始呼叫本地模型 {LLM_MODEL} @ {LLM_BASE_URL} …"})
 
-    client = anthropic.Anthropic(api_key=api_key)
-    yield sse({"type": "log", "msg": "開始呼叫 AI…"})
+    endpoint = LLM_BASE_URL.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": LLM_MAX_TOKENS,
+        "stream": True,
+    }
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_KEY and LLM_API_KEY != "EMPTY":
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
 
+    stripper = _ThinkStripper(enabled=LLM_STRIP_THINK)
     try:
-        with client.messages.stream(
-            model="claude-sonnet-4-6",
-            max_tokens=64000,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            for chunk in stream.text_stream:
-                if request and await request.is_disconnected():
-                    break
-                yield sse({"type": "chunk", "html": chunk})
-                await asyncio.sleep(0)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(LLM_TIMEOUT, connect=10.0)) as http:
+            async with http.stream("POST", endpoint, json=payload, headers=headers) as resp:
+                if resp.status_code != 200:
+                    body = (await resp.aread()).decode("utf-8", "ignore")
+                    yield sse({"type": "error", "msg": f"模型服務回應 {resp.status_code}：{body[:500]}"})
+                    return
+                async for line in resp.aiter_lines():
+                    if request and await request.is_disconnected():
+                        break
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content") or ""
+                    if not delta:
+                        continue
+                    visible = stripper.feed(delta)
+                    if visible:
+                        yield sse({"type": "chunk", "html": visible})
+                        await asyncio.sleep(0)
+        tail = stripper.flush()
+        if tail:
+            yield sse({"type": "chunk", "html": tail})
     except Exception as e:
-        yield sse({"type": "error", "msg": str(e)})
+        yield sse({"type": "error", "msg": f"呼叫模型失敗：{e}"})
         return
 
     yield sse({"type": "progress", "current": total_chapters, "total": total_chapters, "chapter": ""})

@@ -1,6 +1,6 @@
-// 開發模式（vite dev server）走 localhost:8000；
+// 開發模式（vite dev server）走 localhost:7003；
 // 生產模式（exe 打包後）由後端同時 serve 前端，使用相對路徑避免跨來源問題。
-const BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
+const BASE = import.meta.env.DEV ? 'http://localhost:7003' : ''
 
 export interface Chapter {
   title: string
