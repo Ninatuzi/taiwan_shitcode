@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 虚拟环境
+原始碼/.venv/
+.venv/
+venv/
+
+# 本地配置（含密钥）—— 用 .env.example 作模板
+原始碼/.env
+.env
+
+# 运行期数据（按 case_id 分目录的上传文件）
+原始碼/data/
+/data/cases/
+
+# 日志
+*.log

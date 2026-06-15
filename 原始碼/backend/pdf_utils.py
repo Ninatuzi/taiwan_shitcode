@@ -3,13 +3,25 @@ import pypdf
 from collections import Counter
 
 try:
-    import fitz
-    from PIL import Image
-    import pytesseract
     import os
-    _TESS_DEFAULT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    if os.path.exists(_TESS_DEFAULT):
-        pytesseract.pytesseract.tesseract_cmd = _TESS_DEFAULT
+    import shutil
+
+    import fitz
+    import pytesseract
+    from PIL import Image
+
+    # 跨平台定位 tesseract：
+    # 1) 显式环境变量 TESSERACT_CMD 优先
+    # 2) Linux/macOS：依赖 PATH（shutil.which）
+    # 3) Windows：回退到默认安装路径
+    _tess_env = os.environ.get("TESSERACT_CMD")
+    _tess_win = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if _tess_env and os.path.exists(_tess_env):
+        pytesseract.pytesseract.tesseract_cmd = _tess_env
+    elif shutil.which("tesseract"):
+        pass  # 在 PATH 中，pytesseract 默认即可找到
+    elif os.path.exists(_tess_win):
+        pytesseract.pytesseract.tesseract_cmd = _tess_win
     HAS_OCR = True
 except ImportError:
     HAS_OCR = False
