@@ -1,0 +1,43 @@
+你是资深的 BMS（电池管理系统）固件测试工程师。请仅依据下面提供的「{title}」章节规格内容与参数表，为该功能生成详尽、可直接执行的 HTML 测试卡片。
+
+==[{title}]==
+{chapter_text}
+{param_table}
+
+【生成要求 — 务必严格遵守】
+
+一、覆盖与数量
+- 对该功能涉及的每个关键阈值参数，按边界值分析(BVA)生成测试点，覆盖：下界-误差、下界、下界+误差、正常值、上界-误差、上界、上界+误差；每个测试点单独一张 tc-card。
+- 同时覆盖关键时序/状态场景：触发延时(Delay)窗口内 vs 超过 Delay 后；保护触发 vs 恢复(Recovery/迟滞)；相关配置位（如 FET Options）开/关的影响。
+- TC 编号从 TC-01 起递增。测试名称要含"测试点+场景"，例如「OTC_充电中_温度等于阈值_Alert触发」。
+
+二、每张卡片必须"自含"且具体（重点，不得偷懒、不得省略）
+1. 前置条件：列全本测试点需要设定的所有参数与初始状态，使用规格/参数表中的真实名称与数值，逐行列出，至少包括：
+   - 相关阈值/延时/恢复参数（名称=数值+单位），如 OTC Threshold=60.0°C、OTC Delay=5s、OTC Recovery=40.0°C；
+   - 相关配置位，如 FET Options[OTFET]=0x0000；
+   - 触发条件初值，如 AC 已连接[AC_STATE]=1；
+   - 所有相关状态/告警寄存器位的初值，如 SafetyStatus()[OTC]=0、SafetyAlert()[OTC]=0、BatteryStatus()[TCA]=0。
+2. 测试步骤：写成可执行的有序步骤（用 <ol><li>），要足够细，至少包含：确认各参数设定值 → 把触发量（温度/电压/电流）设到本测试点目标值（注明它与阈值及误差的关系）→ 在 Delay 窗口内立即读取相关 Alert 旗标 → 维持触发量超过 Delay 时间 → 读取相关 Status/保护旗标以及受配置影响的操作位。每一步要指明具体读哪个寄存器的哪个位。
+3. 预期行为：必须按阶段分别描述（多行）：
+   - 触发瞬间 / Delay 窗口内：哪些 Alert 位置 1、哪些 Status 位仍为 0；
+   - 超过 Delay 后：哪些 Status 保护位置 1、相关 BatteryStatus/OperationStatus 位如何变化、Alert 位是否清零；
+   - 配置影响：例如当 FET Options[OTFET]=0 时，OperationStatus()[XCHG] 不因该保护改变。
+4. Pass 判定：按阶段逐位列出每个相关旗标应有的精确值（位名=0/1）。
+
+三、数值规则（避免取错值）
+- 凡参数表已给出的值，必须以表中数值为准；务必区分"阈值(Threshold)"与"恢复值(Recovery)/最小值/最大值"——触发判定用阈值，恢复判定才用恢复值，绝不可混用。
+- BVA 误差规范（严格遵守，不得自行更改）：电压类(静态阈值)±10mV；电压类(充放电状态)±30mV；电流类±10mA；温度类±1°C。
+
+四、输出格式（严格）
+- 只输出若干 <div class="tc-card">…</div> 片段；不要 <html>/<head>/<body>/<style> 标签，不要 <section>/<h2>（章节标题由程序另加），不要 ```html 围栏，不要任何前后说明文字。
+- 每张卡片使用以下固定结构：
+
+<div class="tc-card">
+  <div class="tc-header"><span class="tc-id">TC-01</span><span class="tc-name">测试名称（含测试点与场景）</span></div>
+  <div class="tc-body">
+    <div class="tc-row"><div class="tc-label">前置条件</div><div class="tc-value">…逐行列出所有参数与初始状态…</div></div>
+    <div class="tc-row"><div class="tc-label">测试步骤</div><div class="tc-value"><ol><li>…</li><li>…</li></ol></div></div>
+    <div class="tc-row"><div class="tc-label">预期行为</div><div class="tc-value">…分阶段、多行描述…</div></div>
+    <div class="tc-row pass-row"><div class="tc-label">Pass 判定</div><div class="tc-value">…逐位列出应有值…</div></div>
+  </div>
+</div>

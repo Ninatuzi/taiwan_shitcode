@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
 
 import pypdf
 from sqlalchemy.orm import Session
@@ -32,6 +34,39 @@ from .models import Case, GenerationResult, GenerationTask, OpLog
 
 _settings = get_settings()
 
+# 提示词模板外置：可直接编辑此文件迭代，无需改代码。
+_PROMPT_PATH = Path(__file__).parent / "prompts" / "testcase_prompt.txt"
+
+# 文件缺失时的兜底模板（与文件内容等价的精简版）。
+_FALLBACK_TEMPLATE = """你是资深的 BMS 固件测试工程师。请依据「{title}」章节规格与参数表生成详尽的 HTML 测试卡片。
+
+==[{title}]==
+{chapter_text}
+{param_table}
+
+要求：按 BVA 覆盖各阈值（下界-误差/下界/下界+误差/正常/上界-误差/上界/上界+误差）各一张卡片；
+前置条件列全相关参数与所有相关状态/告警寄存器位初值；测试步骤写成可执行的有序步骤并指明读取的寄存器位；
+预期行为分阶段（Delay 窗口内 / 超过 Delay / 配置影响）描述；Pass 判定逐位列值；
+严格区分阈值与恢复值；BVA 误差：电压静态±10mV、电压充放电±30mV、电流±10mA、温度±1°C。
+只输出若干 <div class="tc-card">…</div>，不要 <section>/<h2>、不要 ```html 围栏、不要任何说明文字。
+固定结构：
+<div class="tc-card"><div class="tc-header"><span class="tc-id">TC-01</span><span class="tc-name">名称</span></div>
+<div class="tc-body">
+<div class="tc-row"><div class="tc-label">前置条件</div><div class="tc-value">…</div></div>
+<div class="tc-row"><div class="tc-label">测试步骤</div><div class="tc-value"><ol><li>…</li></ol></div></div>
+<div class="tc-row"><div class="tc-label">预期行为</div><div class="tc-value">…</div></div>
+<div class="tc-row pass-row"><div class="tc-label">Pass 判定</div><div class="tc-value">…</div></div>
+</div></div>
+"""
+
+
+@lru_cache(maxsize=1)
+def _load_template() -> str:
+    try:
+        return _PROMPT_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return _FALLBACK_TEMPLATE
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -39,52 +74,34 @@ def _now() -> datetime:
 
 def _build_param_table(matched: list[dict]) -> str:
     if not matched:
-        return ""
+        return "\n（本章节未匹配到参数表数据，请依据上方规格正文推算数值）\n"
     rows = [
         f"| {p.get('name','')} | {p.get('value','')} "
         f"| {p.get('unit') or '–'} | {p.get('min','–')} | {p.get('max','–')} |"
         for p in matched
     ]
     return (
-        f"\n[本章节相关参数共 {len(matched)} 筆，測試數值請以下表為準]\n"
-        "| 參數名稱 | 目前值 | 單位 | Min | Max |\n"
+        f"\n[本章节相关参数共 {len(matched)} 条，测试数值请以下表为准，"
+        "注意区分阈值(Threshold)与恢复值(Recovery)/Min/Max]\n"
+        "| 参数名称 | 当前值 | 单位 | Min | Max |\n"
         "|---|---|---|---|---|\n" + "\n".join(rows) + "\n"
     )
 
 
 def build_prompt(title: str, chapter_text: str, matched: list[dict]) -> str:
-    """单章节 Prompt（沿用旧版的卡片结构与 BVA 误差规范）。"""
+    """从外置模板生成单章节 Prompt（沿用卡片结构与 BVA 误差规范）。"""
     # 粗略输入预算保护：按 token≈2 字符估算，超限则截断章节正文。
     budget_chars = max(2000, _settings.llm_max_input_tokens * 2)
     if len(chapter_text) > budget_chars:
         chapter_text = chapter_text[:budget_chars] + "\n…（内容过长已截断）"
 
     param_table = _build_param_table(matched)
-    return f"""你是專業的 BMS 固件測試工程師。以下是規格書中「{title}」章節的內容：
-
-==[{title}]==
-{chapter_text}
-{param_table}
-請依據上述規格內容，為「{title}」這一個章節生成 HTML 測試卡片，嚴格遵守以下規則：
-- 直接輸出純 HTML 片段，只包含若干 <div class="tc-card">...</div>，不要 <html>/<head>/<body>/<style> 標籤，不要 ```html 標記，不要任何前後說明文字。
-- 不要輸出 <section> 或 <h2>，只輸出 tc-card（章節標題會由程式另行包裹）。
-- 每個測試案例使用以下固定 HTML 結構（TC 編號從 01 遞增）：
-
-<div class="tc-card">
-  <div class="tc-header"><span class="tc-id">TC-01</span><span class="tc-name">測試名稱</span></div>
-  <div class="tc-body">
-    <div class="tc-row"><div class="tc-label">前置條件</div><div class="tc-value">...</div></div>
-    <div class="tc-row"><div class="tc-label">測試步驟</div><div class="tc-value"><ol><li>設定參數值</li><li>等待/觸發條件</li><li>讀取暫存器/旗標</li></ol></div></div>
-    <div class="tc-row"><div class="tc-label">預期行為</div><div class="tc-value">...</div></div>
-    <div class="tc-row pass-row"><div class="tc-label">Pass 判定</div><div class="tc-value">...</div></div>
-  </div>
-</div>
-
-- 若已提供參數規格表，測試數值必須以表中數值為準；未涵蓋的參數才從規格書推算。
-- BVA 測試誤差規範（必須嚴格遵守）：電壓類(靜態閾值)±10mV；電壓類(充放電狀態)±30mV；電流類±10mA；溫度類±1°C。
-- 每張 tc-card 必須完全自含：每個 TC 的「前置條件」與「測試步驟」都必須明確列出所有需要設定的參數值，不得因為前面 TC 已設定過而省略。
-- 測試點須涵蓋：下界-誤差、下界、下界+誤差、正常值、上界-誤差、上界、上界+誤差，每個測試點各一張 tc-card。
-"""
+    template = _load_template()
+    return (
+        template.replace("{title}", title)
+        .replace("{chapter_text}", chapter_text)
+        .replace("{param_table}", param_table)
+    )
 
 
 def _chapter_payloads(case: Case, selected_titles: list[str]):

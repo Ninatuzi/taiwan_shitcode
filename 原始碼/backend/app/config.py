@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="DeepSeek-V4-Flash", alias="LLM_MODEL")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_max_input_tokens: int = Field(default=24000, alias="LLM_MAX_INPUT_TOKENS")
-    llm_max_output_tokens: int = Field(default=8000, alias="LLM_MAX_OUTPUT_TOKENS")
+    llm_max_output_tokens: int = Field(default=16000, alias="LLM_MAX_OUTPUT_TOKENS")
     llm_timeout: int = Field(default=600, alias="LLM_TIMEOUT")
 
     # ── 嵌入模型 ──
