@@ -39,3 +39,23 @@ class CleanupResponse(BaseModel):
     skipped_running: int
     deleted_ids: list[str]
     skipped_ids: list[str]
+
+
+class GenerateRequest(BaseModel):
+    selected_titles: list[str]
+
+
+class GenerateResponse(BaseModel):
+    task_id: uuid.UUID
+    case_id: uuid.UUID
+    status: str
+    chapters_generated: int
+    tc_count: int | None
+    html: str
+
+
+class ResultResponse(BaseModel):
+    case_id: uuid.UUID
+    task_id: uuid.UUID
+    tc_count: int | None
+    html: str
