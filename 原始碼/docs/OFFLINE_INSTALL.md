@@ -91,3 +91,55 @@ python -m venv .venv
 - **`pgvector 编译失败`**：缺 `gcc`/`make` 或 PG 开发头文件。
 - **`找不到 redis-server / redis6-server`**：你的发行版 Redis 命令名不同，确认已安装。
 - **PostgreSQL 用 16**：把上面的 15 换成 16 即可，pgvector 0.8.0 与 PG16 完全兼容。
+
+---
+
+## 附：Ubuntu 24.04 + Anaconda 环境 + 离线（实战）
+
+适用场景：PostgreSQL 装在 conda 环境里（如 `taiwan_1`，`pg_config` 在
+`~/anaconda3/envs/taiwan_1/bin/`），系统无 Redis，有 gcc/make/git，无网。
+
+需要从联网机拷过来的产物：
+1. **pgvector 源码** `pgvector-0.8.0.tar.gz`（同前）。
+2. **Redis 源码** `redis-x.x.x.tar.gz`（来自 https://download.redis.io/releases/ ，
+   Redis 编译零外部依赖，最适合离线）。
+3. **Python wheels**（同前，用 conda 环境的 Python 版本下载）。
+
+步骤：
+
+```bash
+# 0) 激活 conda 环境，确保 initdb/pg_ctl/psql/pg_config 在 PATH
+conda activate taiwan_1
+
+# 1) 编译 Redis（零依赖）
+tar xzf redis-*.tar.gz && cd redis-* && make -j"$(nproc)" && cd ..
+#   得到 src/redis-server 与 src/redis-cli
+
+# 2) 解压 pgvector 源码（脚本会针对 conda 的 pg_config 编译）
+tar xzf pgvector-0.8.0.tar.gz
+
+# 3) 以普通用户跑 PG（PostgreSQL 不能用 root）。若当前是 root，
+#    先建个普通用户并切过去，或用一个你有权限的用户。
+#    下例假设用户名 bmsdev、数据目录放在其家目录：
+SKIP_INSTALL=1 \
+PG_OS_USER=bmsdev \
+PGDATA=/home/bmsdev/pgdata \
+PGVECTOR_SRC="$PWD/pgvector-0.8.0" \
+REDIS_SERVER="$PWD/redis-7.4.0/src/redis-server" \
+REDIS_CLI="$PWD/redis-7.4.0/src/redis-cli" \
+bash 原始碼/scripts/dev_bootstrap.sh
+
+# 4) Python 依赖（用 conda 环境的 pip）
+cd 原始碼
+pip install --no-index --find-links=/绝对路径/bms-wheels -r requirements.txt
+
+# 5) 建表 + 自测
+python -m backend.app.schema
+python -m pytest tests/ -v
+```
+
+> 关键点：
+> - 脚本会自动在 `~/anaconda3/envs/*/bin` 等路径找到 conda 里的 PG 二进制。
+> - `PG_OS_USER` 设为要跑 PG 的普通用户；设成当前用户名则直接运行不 `su`。
+> - **PostgreSQL 拒绝以 root 启动**，所以别用 root 当 `PG_OS_USER`。
+> - 用 `REDIS_SERVER`/`REDIS_CLI` 指向你自编译的 Redis 二进制即可，无需系统安装。
