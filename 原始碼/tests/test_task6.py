@@ -119,3 +119,24 @@ def test_generate_model_error_sets_failed(client, monkeypatch):
         assert any(t.status == "failed" for t in tasks)
     finally:
         db.close()
+
+
+
+def test_load_template_tolerates_gbk(tmp_path, monkeypatch):
+    """模板文件被存成 GBK(Windows 另存常见)时,加载不应崩溃。"""
+    from backend.app import generation
+
+    gbk_file = tmp_path / "testcase_prompt.txt"
+    content = "你是资深的 BMS 固件测试工程师。{title}\n{chapter_text}\n{param_table}"
+    gbk_file.write_bytes(content.encode("gbk"))  # 故意用 GBK 编码
+
+    monkeypatch.setattr(generation, "_PROMPT_PATH", gbk_file)
+    generation._load_template.cache_clear()
+    try:
+        loaded = generation._load_template()
+        assert "你是资深的 BMS" in loaded  # 正确按 GBK 解码出中文
+        # build_prompt 也应正常工作,不抛 UnicodeDecodeError
+        prompt = generation.build_prompt("2.9 OTC", "正文内容", [])
+        assert "2.9 OTC" in prompt
+    finally:
+        generation._load_template.cache_clear()

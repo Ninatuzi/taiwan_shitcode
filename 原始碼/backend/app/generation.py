@@ -62,10 +62,18 @@ _FALLBACK_TEMPLATE = """你是资深的 BMS 固件测试工程师。请依据「
 
 @lru_cache(maxsize=1)
 def _load_template() -> str:
+    """读取提示词模板，容忍非 UTF-8 编码（如 Windows 另存的 GBK），绝不因编码崩溃。"""
     try:
-        return _PROMPT_PATH.read_text(encoding="utf-8")
+        raw = _PROMPT_PATH.read_bytes()
     except OSError:
         return _FALLBACK_TEMPLATE
+    for enc in ("utf-8", "utf-8-sig", "gbk", "gb18030"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    # 实在不行也别崩，用替换字符兜底。
+    return raw.decode("utf-8", errors="replace")
 
 
 def _now() -> datetime:
