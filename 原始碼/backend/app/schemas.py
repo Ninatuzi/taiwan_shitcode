@@ -13,10 +13,17 @@ class Chapter(BaseModel):
     level: int
 
 
+class LLMInfo(BaseModel):
+    base_url: str
+    model: str
+    api_key_set: bool
+
+
 class HealthResponse(BaseModel):
     status: str
     db: bool
     redis: bool
+    llm: LLMInfo
 
 
 class UploadPdfResponse(BaseModel):

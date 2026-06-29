@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import generation
+from ..config import get_settings
 from ..db import get_db
 from ..models import Case, GenerationResult
 from ..schemas import GenerateRequest, GenerateResponse, ResultResponse
@@ -59,7 +60,11 @@ def generate(
     try:
         task = generation.run_generation(db, case, req.selected_titles)
     except Exception as e:  # 模型/网络错误等
-        raise HTTPException(status_code=502, detail=f"生成失败: {e}") from e
+        s = get_settings()
+        raise HTTPException(
+            status_code=502,
+            detail=f"生成失败 (endpoint={s.llm_base_url}, model={s.llm_model}): {e}",
+        ) from e
 
     result = db.execute(
         select(GenerationResult).where(GenerationResult.task_id == task.id)

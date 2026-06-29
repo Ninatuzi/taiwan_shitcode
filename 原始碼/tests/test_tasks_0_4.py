@@ -16,6 +16,11 @@ def test_health(client):
     assert data["db"] is True, "DB 未连通"
     assert data["redis"] is True, "Redis 未连通"
     assert data["status"] == "ok"
+    # 透出当前生效的 LLM 配置(便于排查连的哪个端点)
+    assert "llm" in data
+    assert data["llm"]["base_url"]
+    assert data["llm"]["model"]
+    assert "api_key_set" in data["llm"]
 
 
 # ── Task 2 ──

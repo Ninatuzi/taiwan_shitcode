@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     llm_timeout: int = Field(default=600, alias="LLM_TIMEOUT")
 
     # ── 嵌入模型 ──
-    embed_base_url: str = Field(default="http://10.7.5.237:5001/v1", alias="EMBED_BASE_URL")
+    embed_base_url: str = Field(default="http://10.0.6.89:8080/v1", alias="EMBED_BASE_URL")
     embed_model: str = Field(default="bge-m3", alias="EMBED_MODEL")
     embed_dim: int = Field(default=1024, alias="EMBED_DIM")
 
