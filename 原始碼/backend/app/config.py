@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     max_queued: int = Field(default=2, alias="MAX_QUEUED")
 
     # ── 本地模型（OpenAI 兼容接口）──
-    llm_base_url: str = Field(default="http://10.7.5.237:5001/v1", alias="LLM_BASE_URL")
+    llm_base_url: str = Field(default="http://10.0.6.89:8080/v1", alias="LLM_BASE_URL")
     llm_model: str = Field(default="DeepSeek_32B_f16", alias="LLM_MODEL")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_max_input_tokens: int = Field(default=24000, alias="LLM_MAX_INPUT_TOKENS")
