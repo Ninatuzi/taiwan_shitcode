@@ -194,41 +194,43 @@ def _chapter_payloads(case: Case, selected_titles: list[str]):
     return selected, payloads
 
 
-def run_generation(
-    db: Session,
-    case: Case,
-    selected_titles: list[str],
-    on_event: Callable[[str, dict], None] | None = None,
-    mode: str = "free",
-) -> GenerationTask:
-    """同步执行生成：分章节调模型，拼装 HTML，落库。返回完成的 task。
+class GenerationCancelled(Exception):
+    """生成被用户取消。"""
 
-    mode: "free"（模型自由生成，Task 6）| "engine"（覆盖引擎确定性枚举测试点，模型只填写，Task 8）。
-    on_event(event_type, data)：进度/日志/片段回调（SSE 复用）。
+
+def execute_task(
+    db: Session,
+    task: GenerationTask,
+    mode: str = "free",
+    on_event: Callable[[str, dict], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> GenerationTask:
+    """执行一个已存在的 task(队列 worker 与同步路径共用)。分章节调模型、落库。
+
+    支持取消:should_cancel() 返回 True 时中止并把 task 标记为 canceled。
     """
     def emit(t: str, **data):
         if on_event:
             on_event(t, data)
 
-    selected, payloads = _chapter_payloads(case, selected_titles)
+    def cancelled() -> bool:
+        return bool(should_cancel and should_cancel())
 
-    task = GenerationTask(
-        case_id=case.id,
-        selected_titles=selected_titles,
-        status="running",
-        total_chapters=len(selected),
-        started_at=_now(),
-    )
-    db.add(task)
+    case = db.get(Case, task.case_id)
+    selected, payloads = _chapter_payloads(case, task.selected_titles)
+
+    task.status = "running"
+    task.started_at = _now()
+    task.total_chapters = len(selected)
     case.status = "analyzing"
     db.commit()
-    db.refresh(task)
-
     emit("log", msg=f"实际送入模型的章节共 {len(selected)} 个")
 
     html_parts: list[str] = []
     try:
         for idx, (ch, text, matched) in enumerate(payloads, start=1):
+            if cancelled():
+                raise GenerationCancelled()
             title = ch["title"]
             task.current_chapter = title
             db.commit()
@@ -240,8 +242,11 @@ def run_generation(
                 emit("log", msg=f"[{title}] 覆盖引擎枚举 {plan['combination_count']} 个测试点")
             else:
                 prompt = build_prompt(title, text, matched)
+
             chunks: list[str] = []
             for piece in _llm.stream_chat(prompt):
+                if cancelled():
+                    raise GenerationCancelled()
                 chunks.append(piece)
                 emit("chunk", html=piece)
             chapter_html = clean_output("".join(chunks))
@@ -249,22 +254,26 @@ def run_generation(
                 f'<section class="tc-section"><h2>{title}</h2>\n{chapter_html}\n</section>'
             )
 
-        full_html = "\n".join(html_parts)
-        # 兜底:再次去除可能残留的 NUL(标题等其它来源),避免 PostgreSQL 入库报错
-        full_html = full_html.replace("\x00", "")
+        full_html = "\n".join(html_parts).replace("\x00", "")
         tc_count = full_html.count('class="tc-card"')
 
-        result = GenerationResult(
-            task_id=task.id, case_id=case.id, html=full_html, tc_count=tc_count
-        )
-        db.add(result)
+        db.add(GenerationResult(task_id=task.id, case_id=case.id, html=full_html, tc_count=tc_count))
         task.status = "done"
         task.finished_at = _now()
         case.status = "done"
-        db.add(OpLog(action="generate", case_id=case.id, detail={"tc_count": tc_count, "chapters": len(selected)}))
+        db.add(OpLog(action="generate", case_id=case.id, detail={"tc_count": tc_count, "chapters": len(selected), "mode": mode}))
         db.commit()
         db.refresh(task)
         emit("done", tc_count=tc_count)
+        return task
+    except GenerationCancelled:
+        db.rollback()
+        task = db.get(GenerationTask, task.id)
+        if task:
+            task.status = "canceled"
+            task.finished_at = _now()
+            db.commit()
+        emit("canceled", msg="任务已取消")
         return task
     except Exception as e:
         db.rollback()
@@ -273,7 +282,24 @@ def run_generation(
             task.status = "failed"
             task.error_msg = str(e)
             task.finished_at = _now()
-        case.status = "failed"
+        c = db.get(Case, task.case_id) if task else None
+        if c:
+            c.status = "failed"
         db.commit()
         emit("error", msg=str(e))
         raise
+
+
+def run_generation(
+    db: Session,
+    case: Case,
+    selected_titles: list[str],
+    on_event: Callable[[str, dict], None] | None = None,
+    mode: str = "free",
+) -> GenerationTask:
+    """同步执行生成(Task 6 兼容路径):建 task 后立即执行。返回完成的 task。"""
+    task = GenerationTask(case_id=case.id, selected_titles=selected_titles, status="queued")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return execute_task(db, task, mode=mode, on_event=on_event)

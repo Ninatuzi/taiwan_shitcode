@@ -14,8 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import SessionLocal
-from .routers import admin, cases, console, export, generate, health, history
+from .routers import admin, cases, console, export, generate, health, history, tasks
 from .storage import cleanup_expired
+from .taskqueue import dispatcher
 
 _settings = get_settings()
 logger = logging.getLogger("bms")
@@ -47,9 +48,13 @@ async def lifespan(app: FastAPI):
     )
     _scheduler.start()
     logger.info("清理调度已启动，周期 %sh", _settings.cleanup_interval_hours)
+    # 启动队列调度器(消费 Redis 队列,Task 5)
+    dispatcher.start()
+    logger.info("任务队列调度器已启动 (running<=%s, queued<=%s)", _settings.max_running, _settings.max_queued)
     try:
         yield
     finally:
+        dispatcher.stop()
         if _scheduler:
             _scheduler.shutdown(wait=False)
 
@@ -69,4 +74,5 @@ app.include_router(cases.router)
 app.include_router(generate.router)
 app.include_router(export.router)
 app.include_router(history.router)
+app.include_router(tasks.router)
 app.include_router(admin.router)

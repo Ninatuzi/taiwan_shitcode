@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import io
+import os
+
+# 测试中禁用后台队列调度器,改由测试直接调用 process_task(确定性)
+os.environ.setdefault("BMS_NO_DISPATCHER", "1")
 
 import fitz  # PyMuPDF
 import pytest

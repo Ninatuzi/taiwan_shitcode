@@ -9,14 +9,16 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import generation
 from .. import coverage as coverage_mod
+from .. import taskqueue
 from ..config import get_settings
 from ..db import get_db
-from ..models import Case, GenerationResult
+from ..models import Case, GenerationResult, GenerationTask
 from ..rendering import render_full_page
 from ..schemas import CoverageRequest, GenerateRequest, GenerateResponse, ResultResponse
 
@@ -41,10 +43,10 @@ def coverage_plan(
     return {"case_id": str(case_id), "total_test_points": total, "chapters": chapters}
 
 
-@router.post("/{case_id}/generate", response_model=GenerateResponse)
+@router.post("/{case_id}/generate")
 def generate(
     case_id: uuid.UUID, req: GenerateRequest, db: Session = Depends(get_db)
-) -> GenerateResponse:
+):
     case = db.get(Case, case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case 不存在")
@@ -56,6 +58,24 @@ def generate(
     if unknown:
         raise HTTPException(status_code=400, detail=f"章节不存在: {unknown}")
 
+    # 入队异步路径(Task 5):建 queued 任务 → 入队 → 返回 task_id+排位;满则 429
+    if req.queued:
+        task = GenerationTask(case_id=case.id, selected_titles=req.selected_titles, status="queued")
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        try:
+            pos = taskqueue.enqueue(str(task.id), req.mode)
+        except taskqueue.QueueFull as e:
+            db.delete(task)
+            db.commit()
+            raise HTTPException(status_code=429, detail=str(e)) from e
+        return JSONResponse(
+            status_code=202,
+            content={"task_id": str(task.id), "case_id": str(case.id), "status": "queued", "queue_position": pos},
+        )
+
+    # 同步路径(Task 6 兼容)
     try:
         task = generation.run_generation(db, case, req.selected_titles, mode=req.mode)
     except Exception as e:  # 模型/网络错误等
@@ -69,14 +89,14 @@ def generate(
         select(GenerationResult).where(GenerationResult.task_id == task.id)
     ).scalar_one_or_none()
 
-    return GenerateResponse(
-        task_id=task.id,
-        case_id=case.id,
-        status=task.status,
-        chapters_generated=task.total_chapters,
-        tc_count=result.tc_count if result else None,
-        html=result.html if result else "",
-    )
+    return {
+        "task_id": str(task.id),
+        "case_id": str(case.id),
+        "status": task.status,
+        "chapters_generated": task.total_chapters,
+        "tc_count": result.tc_count if result else None,
+        "html": result.html if result else "",
+    }
 
 
 def _latest_result(db: Session, case_id: uuid.UUID) -> GenerationResult | None:

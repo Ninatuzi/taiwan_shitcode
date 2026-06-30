@@ -52,6 +52,7 @@ class CleanupResponse(BaseModel):
 class GenerateRequest(BaseModel):
     selected_titles: list[str]
     mode: str = "free"  # free=模型自由生成(Task6) | engine=覆盖引擎枚举(Task8)
+    queued: bool = False  # True=入队异步执行(Task5),返回 task_id+排位;False=同步执行
 
 
 class CoverageRequest(BaseModel):
