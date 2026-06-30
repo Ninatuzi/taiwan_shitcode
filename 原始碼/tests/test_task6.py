@@ -140,3 +140,54 @@ def test_load_template_tolerates_gbk(tmp_path, monkeypatch):
         assert "2.9 OTC" in prompt
     finally:
         generation._load_template.cache_clear()
+
+
+
+def test_clean_output_strips_nul_and_think():
+    """模型输出的 NUL 与 R1 <think> 思考段应被清除。"""
+    from backend.app.llm import clean_output
+
+    raw = "<think>\n我在思考圆面积…\n</think>\n\n```html\n<div class=\"tc-card\">\x00卡片</div>\n```"
+    out = clean_output(raw)
+    assert "\x00" not in out          # NUL 去掉
+    assert "<think>" not in out       # 思考段去掉
+    assert "圆面积" not in out         # 思考内容去掉
+    assert "```" not in out           # 围栏去掉
+    assert 'class="tc-card"' in out   # 正文保留
+
+    # 未闭合的 <think>(思考被截断,无 </think>)应整段丢弃
+    out2 = clean_output("<think>\n无尽的思考没有结束")
+    assert out2 == ""
+
+
+def test_generation_strips_nul_via_model(client, monkeypatch):
+    """模型返回含 NUL 与 <think> 的内容,生成应成功落库、不报 NUL 错误。"""
+    case_id, title = _make_case_with_csv(client)
+
+    def dirty_stream(prompt: str):
+        yield "<think>思考中…</think>"
+        yield '<div class="tc-card">\x00<div class="tc-header">'
+        yield '<span class="tc-id">TC-01</span></div></div>'
+
+    monkeypatch.setattr(llm, "stream_chat", dirty_stream)
+    r = client.post(f"/api/cases/{case_id}/generate", json={"selected_titles": [title]})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["tc_count"] == 1
+    assert "\x00" not in data["html"]
+    assert "<think>" not in data["html"]
+
+
+def test_load_template_fallback_on_garbled(tmp_path, monkeypatch):
+    """模板文件乱码(解码出替换字符)时,应自动改用内置模板。"""
+    from backend.app import generation
+
+    bad = tmp_path / "testcase_prompt.txt"
+    bad.write_bytes(b"\xff\xfe\xfa\xfb garbage not a template")  # 非法字节
+    monkeypatch.setattr(generation, "_PROMPT_PATH", bad)
+    generation._load_template.cache_clear()
+    try:
+        tmpl = generation._load_template()
+        assert "tc-card" in tmpl  # 用了内置兜底模板
+    finally:
+        generation._load_template.cache_clear()

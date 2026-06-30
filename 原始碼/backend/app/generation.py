@@ -28,7 +28,7 @@ from backend.pdf_utils import (
 )
 
 from .config import get_settings
-from .llm import strip_html_fences
+from .llm import clean_output
 from . import llm as _llm
 from .models import Case, GenerationResult, GenerationTask, OpLog
 
@@ -62,18 +62,28 @@ _FALLBACK_TEMPLATE = """你是资深的 BMS 固件测试工程师。请依据「
 
 @lru_cache(maxsize=1)
 def _load_template() -> str:
-    """读取提示词模板，容忍非 UTF-8 编码（如 Windows 另存的 GBK），绝不因编码崩溃。"""
+    """读取提示词模板，容忍非 UTF-8;若文件损坏/乱码/缺关键结构则改用内置模板。
+
+    判定无效的依据:含替换字符 \\ufffd(解码失败)、或不含 'tc-card'(说明不是有效模板)。
+    内置 _FALLBACK_TEMPLATE 在 .py 源码里,编码必然正确,保证模型始终拿到有意义的指令。
+    """
     try:
         raw = _PROMPT_PATH.read_bytes()
     except OSError:
         return _FALLBACK_TEMPLATE
+    text = ""
     for enc in ("utf-8", "utf-8-sig", "gbk", "gb18030"):
         try:
-            return raw.decode(enc)
+            text = raw.decode(enc)
+            break
         except UnicodeDecodeError:
             continue
-    # 实在不行也别崩，用替换字符兜底。
-    return raw.decode("utf-8", errors="replace")
+    else:
+        text = raw.decode("utf-8", errors="replace")
+    # 解码出现替换字符,或内容不像有效模板 → 用内置模板兜底
+    if "\ufffd" in text or "tc-card" not in text or len(text.strip()) < 50:
+        return _FALLBACK_TEMPLATE
+    return text
 
 
 def _now() -> datetime:
@@ -178,12 +188,14 @@ def run_generation(
             for piece in _llm.stream_chat(prompt):
                 chunks.append(piece)
                 emit("chunk", html=piece)
-            chapter_html = strip_html_fences("".join(chunks))
+            chapter_html = clean_output("".join(chunks))
             html_parts.append(
                 f'<section class="tc-section"><h2>{title}</h2>\n{chapter_html}\n</section>'
             )
 
         full_html = "\n".join(html_parts)
+        # 兜底:再次去除可能残留的 NUL(标题等其它来源),避免 PostgreSQL 入库报错
+        full_html = full_html.replace("\x00", "")
         tc_count = full_html.count('class="tc-card"')
 
         result = GenerationResult(
