@@ -191,3 +191,58 @@ def test_load_template_fallback_on_garbled(tmp_path, monkeypatch):
         assert "tc-card" in tmpl  # 用了内置兜底模板
     finally:
         generation._load_template.cache_clear()
+
+
+
+# 用户实测得到的"正常"卡片(R1 干净输出),用于回归:确保我的清洗不破坏它
+_GOOD_CARD = (
+    '<div class="tc-card">'
+    '<div class="tc-header"><span class="tc-id">TC-01</span>'
+    '<span class="tc-name">OTC_充电中_温度等于阈值_Alert触发</span></div>'
+    '<div class="tc-body">'
+    '<div class="tc-row"><div class="tc-label">前置条件</div>'
+    '<div class="tc-value">- OTC Threshold = 60.0°C<br>- OTC Delay = 5s<br>- OTC Recovery = 40.0°C'
+    '<br>- FET Options[OTFET] = 0x0000<br>- AC_STATE = 1<br>- SafetyStatus()[OTC] = 0</div></div>'
+    '<div class="tc-row"><div class="tc-label">测试步骤</div><div class="tc-value"><ol>'
+    '<li>确认所有参数设置正确</li><li>将温度设置为60.0°C（等于OTC Threshold）</li>'
+    '<li>立即读取SafetyAlert()[OTC]，应为1</li></ol></div></div>'
+    '<div class="tc-row"><div class="tc-label">预期行为</div>'
+    '<div class="tc-value">触发瞬间：SafetyAlert()[OTC] = 1</div></div>'
+    '<div class="tc-row pass-row"><div class="tc-label">Pass 判定</div>'
+    '<div class="tc-value">SafetyAlert()[OTC] = 1（触发瞬间）</div></div>'
+    '</div></div>'
+)
+
+
+def test_clean_output_preserves_good_card():
+    """回归:干净的正常卡片(无 think/NUL)经清洗后必须原样保留,不被破坏。"""
+    from backend.app.llm import clean_output
+
+    out = clean_output(_GOOD_CARD)
+    assert out == _GOOD_CARD  # 一字不差
+    assert "OTC Threshold = 60.0°C" in out
+    assert "OTC_充电中_温度等于阈值_Alert触发" in out
+    assert out.count('class="tc-card"') == 1
+
+
+def test_clean_output_keeps_card_after_think():
+    """R1 先输出 <think>思考</think> 再给卡片时:思考剥掉,卡片完整保留。"""
+    from backend.app.llm import clean_output
+
+    raw = "<think>\n我需要分析 OTC 充电过温保护…\n</think>\n\n" + _GOOD_CARD
+    out = clean_output(raw)
+    assert "<think>" not in out and "我需要分析" not in out
+    assert out == _GOOD_CARD  # 卡片部分一字不差保留
+
+
+def test_generation_preserves_good_card_end_to_end(client, monkeypatch):
+    """端到端:模型返回正常卡片,生成结果应完整含该卡片、tc_count=1。"""
+    case_id, title = _make_case_with_csv(client)
+    monkeypatch.setattr(llm, "stream_chat", lambda prompt: iter([_GOOD_CARD]))
+    r = client.post(f"/api/cases/{case_id}/generate", json={"selected_titles": [title]})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["tc_count"] == 1
+    assert "OTC Threshold = 60.0°C" in data["html"]
+    assert "OTC_充电中_温度等于阈值_Alert触发" in data["html"]
+    assert f"<h2>{title}</h2>" in data["html"]
