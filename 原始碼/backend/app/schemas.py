@@ -51,6 +51,12 @@ class CleanupResponse(BaseModel):
 
 class GenerateRequest(BaseModel):
     selected_titles: list[str]
+    mode: str = "free"  # free=模型自由生成(Task6) | engine=覆盖引擎枚举(Task8)
+
+
+class CoverageRequest(BaseModel):
+    selected_titles: list[str]
+    strength: str | None = None  # pairwise(默认) | full
 
 
 class GenerateResponse(BaseModel):

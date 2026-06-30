@@ -79,6 +79,7 @@ input[type=file]{font-size:13px}
 
   <div class="card">
     <h3><span class="step-num">3</span>生成测试用例</h3>
+    <label style="display:block;margin-bottom:8px"><input type="checkbox" id="engine"> 用覆盖引擎(BVA+pairwise,测试点数量由程序保证)</label>
     <button id="btnGen" onclick="generate()" disabled>对勾选的章节生成</button>
     <span class="muted">（同步生成，章节多会等较久，建议先选 1–2 个）</span>
     <div id="genMsg" class="muted"></div>
@@ -162,7 +163,7 @@ async function generate(){
   try{
     const r = await fetch('/api/cases/'+caseId+'/generate', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({selected_titles: titles})
+      body: JSON.stringify({selected_titles: titles, mode: document.getElementById('engine').checked ? 'engine' : 'free'})
     });
     const d = await r.json().catch(()=>({detail:'非 JSON 响应'}));
     if(!r.ok) throw new Error(d.detail || ('HTTP '+r.status));

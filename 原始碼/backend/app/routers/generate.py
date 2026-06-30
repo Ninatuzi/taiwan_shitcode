@@ -13,13 +13,32 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import generation
+from .. import coverage as coverage_mod
 from ..config import get_settings
 from ..db import get_db
 from ..models import Case, GenerationResult
 from ..rendering import render_full_page
-from ..schemas import GenerateRequest, GenerateResponse, ResultResponse
+from ..schemas import CoverageRequest, GenerateRequest, GenerateResponse, ResultResponse
 
 router = APIRouter(prefix="/api/cases", tags=["generate"])
+
+
+@router.post("/{case_id}/coverage")
+def coverage_plan(
+    case_id: uuid.UUID, req: CoverageRequest, db: Session = Depends(get_db)
+) -> dict:
+    """Task 8:返回程序枚举的覆盖计划(BVA 边界点 + pairwise 组合),不调用模型。
+
+    用于证明"测试点数量与覆盖由程序保证、可量化、可复现"。
+    """
+    case = db.get(Case, case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case 不存在")
+    if not req.selected_titles:
+        raise HTTPException(status_code=400, detail="未选择任何章节")
+    chapters = coverage_mod.coverage_for_case(case, req.selected_titles, req.strength)
+    total = sum(c["plan"]["combination_count"] for c in chapters)
+    return {"case_id": str(case_id), "total_test_points": total, "chapters": chapters}
 
 
 @router.post("/{case_id}/generate", response_model=GenerateResponse)
@@ -38,7 +57,7 @@ def generate(
         raise HTTPException(status_code=400, detail=f"章节不存在: {unknown}")
 
     try:
-        task = generation.run_generation(db, case, req.selected_titles)
+        task = generation.run_generation(db, case, req.selected_titles, mode=req.mode)
     except Exception as e:  # 模型/网络错误等
         s = get_settings()
         raise HTTPException(

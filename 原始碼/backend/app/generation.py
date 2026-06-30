@@ -30,6 +30,7 @@ from backend.pdf_utils import (
 from .config import get_settings
 from .llm import clean_output
 from . import llm as _llm
+from . import coverage as _coverage
 from .models import Case, GenerationResult, GenerationTask, OpLog
 
 _settings = get_settings()
@@ -122,6 +123,54 @@ def build_prompt(title: str, chapter_text: str, matched: list[dict]) -> str:
     )
 
 
+def build_engine_prompt(title: str, chapter_text: str, matched: list[dict], plan: dict) -> str:
+    """覆盖引擎模式 Prompt(Task 8):把程序枚举好的测试点交给模型,模型只负责填写成标准卡片。
+
+    数量与覆盖由程序(plan)保证;若无可做 BVA 的参数,则退化为自由生成提示。
+    """
+    combos = plan.get("combinations") or []
+    if not combos:
+        # 没有可枚举的数值参数 → 退回自由生成
+        return build_prompt(title, chapter_text, matched)
+
+    budget_chars = max(2000, _settings.llm_max_input_tokens * 2)
+    if len(chapter_text) > budget_chars:
+        chapter_text = chapter_text[:budget_chars] + "\n…（内容过长已截断）"
+
+    # 枚举测试点表(程序生成,模型必须逐行覆盖)
+    lines = []
+    for i, combo in enumerate(combos, start=1):
+        parts = "；".join(f"{k}={v}" for k, v in combo.items())
+        lines.append(f"测试点{i:02d}: {parts}")
+    points_block = "\n".join(lines)
+    n = len(combos)
+
+    return f"""你是资深的 BMS 固件测试工程师。下面是规格书「{title}」章节内容,以及由程序通过边界值分析(BVA)+成对组合算法枚举出的 {n} 个测试点。
+
+==[{title}]==
+{chapter_text}
+
+【必须逐一覆盖的 {n} 个测试点(每个测试点生成且仅生成一张测试卡片,顺序一致)】
+{points_block}
+
+【生成要求 — 严格遵守】
+- **必须为上面每一个测试点各生成一张 <div class="tc-card">,共 {n} 张,不多不少,顺序与编号一致**(TC-01 对应 测试点01,以此类推)。
+- 每张卡片的前置条件里,必须写明该测试点给定的参数取值(就是上面那一行的 param=value),其余相关状态/寄存器位也要列出初值。
+- 测试步骤要可执行:设定这些参数值 → 触发条件 → 读取相关寄存器/旗标。
+- 预期行为按阶段描述(触发瞬间 / 超过 Delay / 配置影响);Pass 判定逐位列出应有值。
+- 边界值误差规范:电压(静态)±10mV、电压(充放电)±30mV、电流±10mA、温度±1°C。
+- 只输出 {n} 张 <div class="tc-card">…</div>,不要 <section>/<h2>、不要 ```html 围栏、不要任何说明文字。
+- 固定结构:
+<div class="tc-card"><div class="tc-header"><span class="tc-id">TC-01</span><span class="tc-name">名称(含该测试点)</span></div>
+<div class="tc-body">
+<div class="tc-row"><div class="tc-label">前置条件</div><div class="tc-value">…列出本测试点参数取值与初始状态…</div></div>
+<div class="tc-row"><div class="tc-label">测试步骤</div><div class="tc-value"><ol><li>…</li></ol></div></div>
+<div class="tc-row"><div class="tc-label">预期行为</div><div class="tc-value">…</div></div>
+<div class="tc-row pass-row"><div class="tc-label">Pass 判定</div><div class="tc-value">…</div></div>
+</div></div>
+"""
+
+
 def _chapter_payloads(case: Case, selected_titles: list[str]):
     """返回 (选中章节列表, [(chapter, 清洗后正文, 匹配参数), ...])。"""
     pdf_path = case.pdf_path
@@ -150,9 +199,11 @@ def run_generation(
     case: Case,
     selected_titles: list[str],
     on_event: Callable[[str, dict], None] | None = None,
+    mode: str = "free",
 ) -> GenerationTask:
     """同步执行生成：分章节调模型，拼装 HTML，落库。返回完成的 task。
 
+    mode: "free"（模型自由生成，Task 6）| "engine"（覆盖引擎确定性枚举测试点，模型只填写，Task 8）。
     on_event(event_type, data)：进度/日志/片段回调（SSE 复用）。
     """
     def emit(t: str, **data):
@@ -183,7 +234,12 @@ def run_generation(
             db.commit()
             emit("progress", current=idx, total=len(selected), chapter=title)
 
-            prompt = build_prompt(title, text, matched)
+            if mode == "engine":
+                plan = _coverage.build_plan(matched)
+                prompt = build_engine_prompt(title, text, matched, plan)
+                emit("log", msg=f"[{title}] 覆盖引擎枚举 {plan['combination_count']} 个测试点")
+            else:
+                prompt = build_prompt(title, text, matched)
             chunks: list[str] = []
             for piece in _llm.stream_chat(prompt):
                 chunks.append(piece)
