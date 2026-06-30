@@ -16,30 +16,10 @@ from .. import generation
 from ..config import get_settings
 from ..db import get_db
 from ..models import Case, GenerationResult
+from ..rendering import render_full_page
 from ..schemas import GenerateRequest, GenerateResponse, ResultResponse
 
 router = APIRouter(prefix="/api/cases", tags=["generate"])
-
-
-# 渲染结果页用的内嵌样式（与测试卡片的 class 对应）。
-_RESULT_CSS = """
-body{font-family:-apple-system,Segoe UI,Roboto,'Microsoft JhengHei',sans-serif;background:#f5f6f8;margin:0;padding:24px;color:#1f2733}
-h1{font-size:20px;margin:0 0 16px}
-.tc-section{margin-bottom:28px}
-.tc-section>h2{font-size:17px;color:#0b5fa5;border-left:4px solid #0b5fa5;padding-left:10px;margin:18px 0 12px}
-.tc-card{background:#fff;border:1px solid #e3e7ee;border-radius:10px;margin:0 0 14px;box-shadow:0 1px 3px rgba(0,0,0,.05);overflow:hidden}
-.tc-header{display:flex;align-items:center;gap:10px;background:#0b5fa5;color:#fff;padding:8px 14px}
-.tc-id{font-weight:700;background:rgba(255,255,255,.2);padding:2px 8px;border-radius:6px;font-size:13px}
-.tc-name{font-weight:600}
-.tc-body{padding:6px 14px 12px}
-.tc-row{display:flex;gap:12px;padding:8px 0;border-bottom:1px dashed #eef1f5}
-.tc-row:last-child{border-bottom:none}
-.tc-label{flex:0 0 90px;font-weight:600;color:#54607a}
-.tc-value{flex:1}
-.tc-value ol{margin:0;padding-left:18px}
-.pass-row .tc-value{color:#137a3f;font-weight:600}
-.empty{color:#888}
-"""
 
 
 @router.post("/{case_id}/generate", response_model=GenerateResponse)
@@ -101,16 +81,6 @@ def get_result(case_id: uuid.UUID, db: Session = Depends(get_db)) -> ResultRespo
 @router.get("/{case_id}/result.html")
 def get_result_html(case_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
     result = _latest_result(db, case_id)
-    body = (
-        result.html
-        if result and result.html
-        else '<p class="empty">该 case 还没有生成结果。</p>'
-    )
+    body = result.html if result and result.html else ""
     tc = result.tc_count if result else 0
-    page = (
-        "<!doctype html><html lang='zh'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>测试用例结果</title><style>{_RESULT_CSS}</style></head><body>"
-        f"<h1>生成的测试用例（共 {tc} 条）</h1>{body}</body></html>"
-    )
-    return Response(content=page, media_type="text/html; charset=utf-8")
+    return Response(content=render_full_page(body, tc), media_type="text/html; charset=utf-8")

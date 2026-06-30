@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import SessionLocal
-from .routers import admin, cases, console, generate, health
+from .routers import admin, cases, console, export, generate, health, history
 from .storage import cleanup_expired
 
 _settings = get_settings()
@@ -67,4 +67,6 @@ app.include_router(health.router)
 app.include_router(console.router)
 app.include_router(cases.router)
 app.include_router(generate.router)
+app.include_router(export.router)
+app.include_router(history.router)
 app.include_router(admin.router)

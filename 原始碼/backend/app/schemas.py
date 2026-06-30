@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel
 
@@ -66,3 +67,37 @@ class ResultResponse(BaseModel):
     task_id: uuid.UUID
     tc_count: int | None
     html: str
+
+
+class CaseListItem(BaseModel):
+    case_id: uuid.UUID
+    pdf_filename: str
+    pdf_page_count: int
+    status: str
+    csv_filename: str | None
+    csv_param_count: int | None
+    csv_format: str | None
+    latest_tc_count: int | None
+    created_at: datetime
+
+
+class CaseListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[CaseListItem]
+
+
+class CaseDetail(BaseModel):
+    case_id: uuid.UUID
+    pdf_filename: str
+    pdf_page_count: int
+    chapters: list[Chapter]
+    status: str
+    csv_filename: str | None
+    csv_param_count: int | None
+    csv_format: str | None
+    param_count: int
+    latest_tc_count: int | None
+    created_at: datetime
+    expire_at: datetime

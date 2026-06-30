@@ -86,7 +86,13 @@ input[type=file]{font-size:13px}
 
   <div class="card">
     <h3>生成结果</h3>
+    <div id="dlbar" style="margin-bottom:10px"></div>
     <div id="result"><span class="muted">尚无结果。</span></div>
+  </div>
+
+  <div class="card">
+    <h3>历史案例 <button class="sec" style="font-size:12px;padding:4px 10px" onclick="loadHistory()">刷新</button></h3>
+    <div id="history"><span class="muted">点"刷新"加载历史。</span></div>
   </div>
 
 </div>
@@ -162,11 +168,51 @@ async function generate(){
     if(!r.ok) throw new Error(d.detail || ('HTTP '+r.status));
     msg.innerHTML = '<span class="ok">完成</span>　状态='+d.status+'　章节='+d.chapters_generated+'　用例数='+d.tc_count;
     res.innerHTML = d.html || '<span class="muted">（模型未返回内容）</span>';
+    showDownloads(caseId);
+    loadHistory();
   }catch(e){
     msg.innerHTML = '<span class="err">失败：'+escapeHtml(e.message)+'</span>';
     res.innerHTML = '<span class="muted">生成失败,见上方错误。</span>';
   }
   document.getElementById('btnGen').disabled = false;
+}
+
+function showDownloads(cid){
+  document.getElementById('dlbar').innerHTML =
+    '下载：'
+    + '<a href="/api/cases/'+cid+'/export?format=html" target="_blank">HTML</a> ｜ '
+    + '<a href="/api/cases/'+cid+'/export?format=xlsx" target="_blank">Excel</a> ｜ '
+    + '<a href="/api/cases/'+cid+'/export?format=docx" target="_blank">Word</a> ｜ '
+    + '<a href="/api/cases/'+cid+'/result.html" target="_blank">网页查看</a> ｜ '
+    + '<a href="/api/cases/'+cid+'/source-pdf" target="_blank">原PDF</a>';
+}
+
+async function loadHistory(){
+  const box = document.getElementById('history');
+  box.textContent = '加载中…';
+  try{
+    const r = await fetch('/api/cases?page=1&page_size=20');
+    const d = await r.json();
+    if(!d.items || d.items.length===0){ box.innerHTML='<span class="muted">暂无历史案例。</span>'; return; }
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+      + '<tr style="text-align:left;color:#54607a"><th>文件</th><th>状态</th><th>用例数</th><th>时间</th><th>下载</th></tr>';
+    for(const it of d.items){
+      const t = (it.created_at||'').replace('T',' ').slice(0,19);
+      html += '<tr style="border-top:1px solid #eef1f5">'
+        + '<td>'+escapeHtml(it.pdf_filename||'')+'</td>'
+        + '<td>'+escapeHtml(it.status||'')+'</td>'
+        + '<td>'+(it.latest_tc_count==null?'-':it.latest_tc_count)+'</td>'
+        + '<td>'+escapeHtml(t)+'</td>'
+        + '<td>'
+          + '<a href="/api/cases/'+it.case_id+'/result.html" target="_blank">查看</a> '
+          + '<a href="/api/cases/'+it.case_id+'/export?format=html" target="_blank">HTML</a> '
+          + '<a href="/api/cases/'+it.case_id+'/export?format=xlsx" target="_blank">Excel</a> '
+          + '<a href="/api/cases/'+it.case_id+'/export?format=docx" target="_blank">Word</a>'
+        + '</td></tr>';
+    }
+    html += '</table>';
+    box.innerHTML = html;
+  }catch(e){ box.innerHTML = '<span class="err">加载失败：'+escapeHtml(e.message)+'</span>'; }
 }
 
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
