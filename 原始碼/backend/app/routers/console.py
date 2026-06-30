@@ -92,6 +92,14 @@ input[type=file]{font-size:13px}
   </div>
 
   <div class="card">
+    <h3>检索历史结果</h3>
+    <input type="text" id="searchQ" placeholder="输入关键词,如 过温 / OTC / 短路" style="width:280px;padding:6px">
+    <select id="searchMode"><option value="auto">自动</option><option value="keyword">关键词</option><option value="semantic">语义</option></select>
+    <button class="sec" onclick="doSearch()">检索</button>
+    <div id="searchResult" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
     <h3>历史案例 <button class="sec" style="font-size:12px;padding:4px 10px" onclick="loadHistory()">刷新</button></h3>
     <div id="history"><span class="muted">点"刷新"加载历史。</span></div>
   </div>
@@ -217,6 +225,28 @@ async function loadHistory(){
 }
 
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+async function doSearch(){
+  const q = document.getElementById('searchQ').value.trim();
+  const mode = document.getElementById('searchMode').value;
+  const box = document.getElementById('searchResult');
+  if(!q){ box.innerHTML='<span class="err">请输入关键词</span>'; return; }
+  box.textContent = '检索中…';
+  try{
+    const r = await fetch('/api/search?q='+encodeURIComponent(q)+'&mode='+mode);
+    const d = await r.json();
+    if(!d.items || d.items.length===0){ box.innerHTML='<span class="muted">无匹配结果。</span>'; return; }
+    let html = '<div class="muted">命中 '+d.total+' 条(方式:'+escapeHtml(d.mode_used)+')</div>';
+    for(const it of d.items){
+      html += '<div style="border-top:1px solid #eef1f5;padding:6px 0">'
+        + '<a href="/api/cases/'+it.case_id+'/result.html" target="_blank">'+escapeHtml(it.pdf_filename||it.case_id)+'</a>'
+        + (it.score!=null?' <span class="badge">相似度 '+it.score+'</span>':'')
+        + ' <span class="muted">用例数 '+(it.tc_count==null?'-':it.tc_count)+'</span>'
+        + '<div class="muted" style="font-size:12px">'+escapeHtml(it.snippet||'')+'</div></div>';
+    }
+    box.innerHTML = html;
+  }catch(e){ box.innerHTML='<span class="err">检索失败：'+escapeHtml(e.message)+'</span>'; }
+}
 </script>
 </body>
 </html>
